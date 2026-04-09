@@ -8,10 +8,11 @@ app.post('/forms/:id/score', async (req) => {
   try {
     const dbOk = await isConnected();
     if (dbOk) {
+      const payloadVals = (req.body && req.body.values) ? req.body.values : {};
       await query(
         `INSERT INTO agent_logs (form_id, agent_action, input, output, status)
          VALUES ($1, 'score_lead', $2, $3, 'success')`,
-        [formId, JSON.stringify({ values: req.body?.values ?? {} }), JSON.stringify({ leadScore, qualityTier, routing_destination })]
+        [formId, JSON.stringify({ values: payloadVals }), JSON.stringify({ leadScore, qualityTier, routing_destination })]
       ).catch(() => {});
       await query(
         `UPDATE submissions SET lead_score = $1, quality_tier = $2, routing_destination = $3, qualified = $4
