@@ -1,0 +1,68 @@
+diff --git a/backend/server.js b/backend/server.js
+index e69de29..7a4f3a8 100644
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -app.post('/forms/:id/score', async (req) => {
+-  const formId = req.params.id;
+-  const { values, template_name, vertical: vParam, qualification_rules } = req.body || {};
+-  const request_id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+-  const vertical = verticalFromName(template_name, vParam);
+-  const signals = tierSignals(vertical);
+-  const fallbackScore = Math.floor(Math.random() * 41) + 60;
+-  const fallback = tierFromScore(fallbackScore);
+-  let scored = null;
+-  if (LLM_API_KEY) {
+-    const system = `You are a lead quality scoring engine. Return ONLY valid JSON:
+-{"lead_score":<0-100>,"quality_tier":"hot|warm|cold","routing_destination":"routing_destination_hot|warm|cold","confidence":<0-1>,"reason_codes":["code1","code2"]}
+-Rules: hot(>=80): ${signals.hot} | warm(>=50): ${signals.warm} | cold(<50): ${signals.cold}`;
+-    const prompt = `Vertical: ${vertical}\nValues: ${JSON.stringify(values || {})}\nQualification rules: ${JSON.stringify(qualification_rules || [])}`;
+-    scored = await callLLM(prompt, system);
+-  }
+-  const result = scored || {
+-    lead_score: fallbackScore,
+-    quality_tier: fallback.qualityTier,
+-    routing_destination: routing_destination,
+-    confidence: null,
+-    reason_codes: []
+-  };
+-  // Persist to agent_logs
+-  const dbOk = await isConnected();
+-  if (dbOk) {
+-    await query(
+-      `INSERT INTO agent_logs (form_id, agent_action, input, output, status)
+-       VALUES ($1, 'score_lead', $2, $3, 'success')`,
+-      [formId, JSON.stringify({ values, vertical }), JSON.stringify(result)]
+-    ).catch(() => {});
+-    // Update submission score if exists
+-    await query(
+-      `UPDATE submissions SET lead_score = $1, quality_tier = $2, routing_destination = $3, qualified = $4
+-       WHERE form_id = $5 AND created_at > NOW() - INTERVAL '1 minute'`,
+-      [result.lead_score, result.qualityTier, result.routing_destination, result.lead_score >= 50, formId]
+-    ).catch(() => {});
+-  }
+-  return { ok: true, ...result, request_id };
+-});
++// MVP: /forms/:id/score - deterministic response; no LLMS MVP
++app.post('/forms/:id/score', async (req) => {
++  const formId = req.params.id;
++  const request_id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
++  const leadScore = 60;
++  const qualityTier = 'warm';
++  const routing_destination = 'routing_destination_warm';
++  try {
++    const dbOk = await isConnected();
++    if (dbOk) {
++      await query(
++        `INSERT INTO agent_logs (form_id, agent_action, input, output, status)
++         VALUES ($1, 'score_lead', $2, $3, 'success')`,
++        [formId, JSON.stringify({ values: req.body?.values ?? {} }), JSON.stringify({ leadScore, qualityTier, routing_destination })]
++      ).catch(() => {});
++      await query(
++        `UPDATE submissions SET lead_score = $1, quality_tier = $2, routing_destination = $3, qualified = $4
++         WHERE form_id = $5 AND created_at > NOW() - INTERVAL '1 minute'`,
++        [leadScore, qualityTier, routing_destination, leadScore >= 50, formId]
++      ).catch(() => {});
++    }
++  } catch { /* ignore db errors in MVP */ }
++  return { ok: true, lead_score: leadScore, quality_tier: qualityTier, routing_destination: routing_destination, request_id };
++});
